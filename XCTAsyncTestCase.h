@@ -84,7 +84,6 @@ enum {
     NSInteger notifiedStatus_;
     
     BOOL prepared_; // Whether prepared was called before waitForStatus:timeout:
-    NSRecursiveLock *lock_; // Lock to synchronize on
     SEL waitSelector_; // The selector we are waiting on
     
     NSArray *_runLoopModes;

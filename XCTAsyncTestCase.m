@@ -46,11 +46,10 @@ typedef enum {
 
 @synthesize runLoopModes=_runLoopModes;
 
-
 // Internal GHUnit setUp
 - (void)setUp {
     [super setUp];
-    lock_ = [[NSRecursiveLock alloc] init];
+    
     prepared_ = NO;
     notifiedStatus_ = kXCTUnitWaitStatusUnknown;
 }
@@ -59,8 +58,6 @@ typedef enum {
 - (void)tearDown {
     [super tearDown];
     waitSelector_ = NULL;
-    if (prepared_) [lock_ unlock]; // If we prepared but never waited we need to unlock
-    lock_ = nil;
 }
 
 - (void)prepare {
@@ -68,10 +65,13 @@ typedef enum {
 }
 
 - (void)prepare:(SEL)selector {
-    [lock_ lock];
-    prepared_ = YES;
-    waitSelector_ = selector;
-    notifiedStatus_ = kXCTUnitWaitStatusUnknown;
+    
+    @synchronized(self)
+    {
+        prepared_ = YES;
+        waitSelector_ = selector;
+        notifiedStatus_ = kXCTUnitWaitStatusUnknown;
+    }
 }
 
 - (XCTUnitAsyncError)_waitFor:(NSInteger)status timeout:(NSTimeInterval)timeout {
@@ -92,13 +92,14 @@ typedef enum {
     while(notifiedStatus_ == kXCTUnitWaitStatusUnknown) {
         NSString *mode = [_runLoopModes objectAtIndex:(runIndex++ % [_runLoopModes count])];
         
-        [lock_ unlock];
-        @autoreleasepool {
-            if (!mode || ![[NSRunLoop currentRunLoop] runMode:mode beforeDate:[NSDate dateWithTimeIntervalSinceNow:checkEveryInterval]])
-                // If there were no run loop sources or timers then we should sleep for the interval
-                [NSThread sleepForTimeInterval:checkEveryInterval];
+        @synchronized(self)
+        {
+            @autoreleasepool {
+                if (!mode || ![[NSRunLoop currentRunLoop] runMode:mode beforeDate:[NSDate dateWithTimeIntervalSinceNow:checkEveryInterval]])
+                    // If there were no run loop sources or timers then we should sleep for the interval
+                    [NSThread sleepForTimeInterval:checkEveryInterval];
+            }
         }
-        [lock_ lock];
         
         // If current date is after the run until date
         if ([runUntilDate compare:[NSDate date]] == NSOrderedAscending) {
@@ -106,7 +107,6 @@ typedef enum {
             break;
         }
     }
-    [lock_ unlock];
     
     if (timedOut) {
         return kXCTUnitAsyncErrorTimedOut;
@@ -153,13 +153,13 @@ typedef enum {
 	while ([runUntilDate compare:[NSDate dateWithTimeIntervalSinceNow:0]] == NSOrderedDescending) {
 		NSString *mode = [_runLoopModes objectAtIndex:(runIndex++ % [_runLoopModes count])];
         
-		[lock_ unlock];
-		@autoreleasepool {
-			if (!mode || ![[NSRunLoop currentRunLoop] runMode:mode beforeDate:[NSDate dateWithTimeIntervalSinceNow:checkEveryInterval]])
-				// If there were no run loop sources or timers then we should sleep for the interval
-				[NSThread sleepForTimeInterval:checkEveryInterval];
+		@synchronized(self) {
+            @autoreleasepool {
+                if (!mode || ![[NSRunLoop currentRunLoop] runMode:mode beforeDate:[NSDate dateWithTimeIntervalSinceNow:checkEveryInterval]])
+                    // If there were no run loop sources or timers then we should sleep for the interval
+                    [NSThread sleepForTimeInterval:checkEveryInterval];
+            }
 		}
-		[lock_ lock];
 	}
 }
 
@@ -175,11 +175,11 @@ typedef enum {
         if (selector != NULL && !sel_isEqual(waitSelector_, selector)) {
             NSLog(@"Warning: Notified from %@ but we were waiting for %@", NSStringFromSelector(selector), NSStringFromSelector(waitSelector_));
         }  else {
-            [lock_ lock];
-            notifiedStatus_ = status;
-            [lock_ unlock];
+            @synchronized(self)
+            {
+                notifiedStatus_ = status;
+            }
         }
-        
     }
 }
 
